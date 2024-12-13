@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Golang Server</title>
+</head>
+<body>
+<h1>Social Network Server</h1>
+
+<h3>Send POST Request</h3>
+<button onclick="sendPostRequest()">Send POST</button>
+
+<h3>Send GET Request</h3>
+<button onclick="sendGetRequest()">Send GET</button>
+
+<script>
+    async function sendPostRequest() {
+        const response = await fetch('http://localhost:8080/post', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: 'Hello from HTML!' })
+        });
+        const data = await response.json();
+        console.log(data);
+        alert(JSON.stringify(data));
+    }
+
+    async function sendGetRequest() {
+        const response = await fetch('http://localhost:8080/get');
+        const data = await response.json();
+        console.log(data);
+        alert(JSON.stringify(data));
+    }
+</script>
+</body>
+</html>
