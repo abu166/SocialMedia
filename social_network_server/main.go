@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	// "io"
 	"log"
 	"net/http"
 )
@@ -18,52 +18,44 @@ type ResponseData struct {
 	Message string `json:"message"`
 }
 
-const (
-	maxRequestBodySize = 1 << 20 // Limit request size to 1MB
-)
+const maxRequestBodySize = 1 << 20 // 1MB limit
 
-// Handler for POST requests
 func postHandler(w http.ResponseWriter, r *http.Request) {
 	// Restrict to POST method
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Ensure the Content-Type is application/json
-	if r.Header.Get("Content-Type") != "application/json" {
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		response := ResponseData{"fail", "Content-Type must be application/json"}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		response := ResponseData{"fail", "Only POST method is allowed"}
 		json.NewEncoder(w).Encode(response)
 		return
 	}
-
-	// Set a limit for request body size to prevent abuse
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	defer r.Body.Close()
 
 	// Set response content type to JSON
 	w.Header().Set("Content-Type", "application/json")
 
-	// Read and parse JSON body
+	// Limit the request body size to prevent abuse
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	// Check if body is empty
+	if r.ContentLength == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		response := ResponseData{"fail", "Request body cannot be empty"}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Read and parse the JSON body
 	var requestData RequestData
-	body, err := io.ReadAll(r.Body)
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&requestData)
+
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		response := ResponseData{"fail", "Error reading request body"}
+		response := ResponseData{"fail", "Invalid JSON message or request too large"}
 		json.NewEncoder(w).Encode(response)
 		return
 	}
 
-	// Decode the JSON content
-	if err := json.Unmarshal(body, &requestData); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		response := ResponseData{"fail", "Invalid JSON format"}
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// Validate the "message" field
+	// Validate "message" field
 	if requestData.Message == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		response := ResponseData{"fail", "Message field is required"}
@@ -75,10 +67,12 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Received message: %s\n", requestData.Message)
 
 	// Return success response
-	w.WriteHeader(http.StatusOK)
 	response := ResponseData{"success", "Data successfully received"}
 	json.NewEncoder(w).Encode(response)
 }
+
+
+const maxQueryParamSize = 1024 // Limit query string size to 1KB
 
 // Handler for GET requests
 func getHandler(w http.ResponseWriter, r *http.Request) {
@@ -91,10 +85,19 @@ func getHandler(w http.ResponseWriter, r *http.Request) {
 	// Set response content type to JSON
 	w.Header().Set("Content-Type", "application/json")
 
+	// Check the total size of query parameters
+	queryString := r.URL.RawQuery
+	if len(queryString) > maxQueryParamSize {
+		http.Error(w, "Query string size exceeds limit", http.StatusRequestEntityTooLarge)
+		return
+	}
+
 	// Log query parameters (if any)
 	queryParams := r.URL.Query()
 	if len(queryParams) == 0 {
 		fmt.Println("No query parameters provided")
+	} else {
+		fmt.Println("Query Parameters:", queryParams)
 	}
 
 	// Validate specific query parameter (optional)
@@ -104,6 +107,13 @@ func getHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(response)
 		return
 	} else {
+		// Check if 'message' parameter exceeds max length
+		if len(msg) > 256 { // You can adjust this length
+			w.WriteHeader(http.StatusBadRequest)
+			response := ResponseData{"fail", "'message' parameter is too long"}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 		fmt.Println("Query parameter 'message':", msg)
 	}
 
