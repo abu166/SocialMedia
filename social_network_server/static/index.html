@@ -2,34 +2,51 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Test Golang Server</title>
+    <title>Golang Server Test</title>
 </head>
 <body>
-<h1>Social Network Server</h1>
+<h1>Golang Server - User Management</h1>
 
-<h3>Send POST Request</h3>
-<button onclick="sendPostRequest()">Send POST</button>
+<h3>Add a User (POST)</h3>
+<input id="name" placeholder="Name" />
+<input id="email" placeholder="Email" />
+<button onclick="sendPostRequest()">Add User</button>
 
-<h3>Send GET Request</h3>
-<button onclick="sendGetRequest()">Send GET</button>
+<h3>Fetch All Users (GET)</h3>
+<button onclick="getUsers()">Get Users</button>
+
+<h3>Users Table</h3>
+<table border="1" id="usersTable">
+    <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Email</th>
+    </tr>
+</table>
 
 <script>
     async function sendPostRequest() {
-        const response = await fetch('http://localhost:8080/post', {
+        const name = document.getElementById("name").value;
+        const email = document.getElementById("email").value;
+
+        const response = await fetch('/post', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: 'Hello from HTML!' })
+            body: JSON.stringify({ name, email })
         });
         const data = await response.json();
-        console.log(data);
-        alert(JSON.stringify(data));
+        alert(data.message);
     }
 
-    async function sendGetRequest() {
-        const response = await fetch('http://localhost:8080/get');
-        const data = await response.json();
-        console.log(data);
-        alert(JSON.stringify(data));
+    async function getUsers() {
+        const response = await fetch('/users');
+        const users = await response.json();
+
+        const table = document.getElementById("usersTable");
+        table.innerHTML = "<tr><th>ID</th><th>Name</th><th>Email</th></tr>";
+        users.forEach(user => {
+            table.innerHTML += `<tr><td>${user.ID}</td><td>${user.Name}</td><td>${user.Email}</td></tr>`;
+        });
     }
 </script>
 </body>
