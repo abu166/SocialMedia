@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	// "log"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -64,6 +65,14 @@ type FilterParams struct {
     Value    string `json:"value"`
     Operator string `json:"operator"`
 }
+
+// Custom error types
+var (
+    ErrUserNotFound = errors.New("user not found")
+    ErrInvalidInput = errors.New("invalid input")
+    ErrDuplicateEmail = errors.New("email already exists")
+    ErrDatabaseOperation = errors.New("database operation failed")
+)
 
 // Initialize database connection
 // func initDB() {
@@ -191,60 +200,89 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 // 	})
 // }
 
-func createUser(w http.ResponseWriter, r *http.Request) {
-	logger := log.WithField("handler", "createUser")
+// func createUser(w http.ResponseWriter, r *http.Request) {
+// 	logger := log.WithField("handler", "createUser")
 	
-	var user User
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		logger.WithError(err).Error("Failed to decode request body")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ResponseData{
-			Status:  "error",
-			Message: "Invalid request body",
-		})
-		return
-	}
+// 	var user User
+// 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+// 		logger.WithError(err).Error("Failed to decode request body")
+// 		w.WriteHeader(http.StatusBadRequest)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: "Invalid request body",
+// 		})
+// 		return
+// 	}
 
-	if user.UserName == "" || user.UserEmail == "" {
-		logger.Warn("Missing required fields")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ResponseData{
-			Status:  "error",
-			Message: "Name and email are required",
-		})
-		return
-	}
+// 	if user.UserName == "" || user.UserEmail == "" {
+// 		logger.Warn("Missing required fields")
+// 		w.WriteHeader(http.StatusBadRequest)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: "Name and email are required",
+// 		})
+// 		return
+// 	}
 
-	if !isValidEmail(user.UserEmail) {
-		logger.WithField("email", user.UserEmail).Warn("Invalid email format")
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
-		return
-	}
+// 	if !isValidEmail(user.UserEmail) {
+// 		logger.WithField("email", user.UserEmail).Warn("Invalid email format")
+// 		http.Error(w, "Invalid email format", http.StatusBadRequest)
+// 		return
+// 	}
 
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
+// 	now := time.Now()
+// 	user.CreatedAt = now
+// 	user.UpdatedAt = now
 
-	result := db.Create(&user)
-	if result.Error != nil {
-		logger.WithError(result.Error).Error("Failed to create user in database")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ResponseData{
-			Status:  "error",
-			Message: "Could not create user",
-		})
-		return
-	}
+// 	result := db.Create(&user)
+// 	if result.Error != nil {
+// 		logger.WithError(result.Error).Error("Failed to create user in database")
+// 		w.WriteHeader(http.StatusInternalServerError)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: "Could not create user",
+// 		})
+// 		return
+// 	}
 
-	logger.WithField("user_id", user.UserID).Info("User created successfully")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(ResponseData{
-		Status:  "success",
-		Message: "User created successfully",
-		Data:    user,
-	})
+// 	logger.WithField("user_id", user.UserID).Info("User created successfully")
+// 	w.WriteHeader(http.StatusCreated)
+// 	json.NewEncoder(w).Encode(ResponseData{
+// 		Status:  "success",
+// 		Message: "User created successfully",
+// 		Data:    user,
+// 	})
+// }
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+    logger := log.WithField("handler", "createUser")
+    
+    var user User
+    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+        handleError(w, fmt.Errorf("%w: %v", ErrInvalidInput, err), http.StatusBadRequest, logger)
+        return
+    }
+
+    if err := validateUser(user); err != nil {
+        handleError(w, err, http.StatusBadRequest, logger)
+        return
+    }
+
+    if err := db.Create(&user).Error; err != nil {
+        if isDuplicateEmailError(err) {
+            handleError(w, ErrDuplicateEmail, http.StatusConflict, logger)
+            return
+        }
+        handleError(w, fmt.Errorf("%w: %v", ErrDatabaseOperation, err), http.StatusInternalServerError, logger)
+        return
+    }
+
+    sendJSONResponse(w, http.StatusCreated, ResponseData{
+        Status: "success",
+        Message: "User created successfully",
+        Data: user,
+    })
 }
-
 
 // Get All Users
 func getAllUsers(w http.ResponseWriter, r *http.Request) {
@@ -355,6 +393,53 @@ func sendErrorResponse(w http.ResponseWriter, message string, statusCode int) {
         Status:  "error",
         Message: message,
     })
+}
+
+// Centralized error handler
+func handleError(w http.ResponseWriter, err error, statusCode int, logger *logrus.Entry) {
+    logger.WithError(err).Error("Operation failed")
+    
+    var response ResponseData
+    switch {
+    case errors.Is(err, ErrUserNotFound):
+        response = ResponseData{Status: "error", Message: "User not found"}
+    case errors.Is(err, ErrInvalidInput):
+        response = ResponseData{Status: "error", Message: "Invalid input provided"}
+    case errors.Is(err, ErrDuplicateEmail):
+        response = ResponseData{Status: "error", Message: "Email already exists"}
+    default:
+        response = ResponseData{Status: "error", Message: "Internal server error"}
+    }
+
+    sendJSONResponse(w, statusCode, response)
+}
+
+// Helper function for JSON responses
+func sendJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(statusCode)
+    if err := json.NewEncoder(w).Encode(data); err != nil {
+        log.WithError(err).Error("Failed to encode JSON response")
+    }
+}
+
+// User validation
+func validateUser(user User) error {
+    if user.UserName == "" {
+        return fmt.Errorf("%w: username is required", ErrInvalidInput)
+    }
+    if user.UserEmail == "" {
+        return fmt.Errorf("%w: email is required", ErrInvalidInput)
+    }
+    if !isValidEmail(user.UserEmail) {
+        return fmt.Errorf("%w: invalid email format", ErrInvalidInput)
+    }
+    return nil
+}
+
+// Helper to check for duplicate email errors
+func isDuplicateEmailError(err error) bool {
+    return strings.Contains(err.Error(), "duplicate key value violates unique constraint")
 }
 
 
