@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	// "log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -29,6 +31,7 @@ func (User) TableName() string {
 
 // Global database instance
 var db *gorm.DB
+var log *logrus.Logger
 
 type ResponseData struct {
 	Status  string      `json:"status"`
@@ -36,22 +39,75 @@ type ResponseData struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+// QueryParams struct to handle filtering, sorting, and pagination parameters
+type QueryParams struct {
+    SearchTerm   string `json:"search_term"`
+    SortField    string `json:"sort_field"`
+    SortDir      string `json:"sort_dir"`
+    Page         int    `json:"page"`
+    ItemsPerPage int    `json:"items_per_page"`
+}
+
+// PaginatedResponse struct to return paginated data
+type PaginatedResponse struct {
+    Status     string      `json:"status"`
+    Message    string      `json:"message"`
+    Data       interface{} `json:"data"`
+    TotalItems int64      `json:"total_items"`
+    TotalPages int        `json:"total_pages"`
+    CurrentPage int       `json:"current_page"`
+}
+
+// Add new types for filter handling
+type FilterParams struct {
+    Field    string `json:"field"`
+    Value    string `json:"value"`
+    Operator string `json:"operator"`
+}
+
 // Initialize database connection
+// func initDB() {
+// 	var err error
+// 	// Update credentials according to your PostgreSQL setup
+// 	dsn := "host=localhost user=abukhassymkhydyrbayev password=admin dbname=social_pub port=5432 sslmode=disable"
+// 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+// 	if err != nil {
+// 		log.Fatalf("Could not connect to the database: %v", err)
+// 	}
+// 	fmt.Println("Connected to the database")
+
+// 	// AutoMigrate to ensure the users table exists with the correct schema
+// 	err = db.AutoMigrate(&User{})
+// 	if err != nil {
+// 		log.Fatalf("Could not migrate database: %v", err)
+// 	}
+
+// 	// Initialize logger
+// 	log = logrus.New()
+// 	log.SetFormatter(&logrus.JSONFormatter{})
+// 	log.SetLevel(logrus.InfoLevel)
+// 	log.Info("Logger initialized")
+// }
+
 func initDB() {
 	var err error
-	// Update credentials according to your PostgreSQL setup
 	dsn := "host=localhost user=abukhassymkhydyrbayev password=admin dbname=social_pub port=5432 sslmode=disable"
+	
+	log = logrus.New()
+	log.SetFormatter(&logrus.JSONFormatter{})
+	log.SetLevel(logrus.InfoLevel)
+	
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("Could not connect to the database: %v", err)
+		log.WithError(err).Fatal("Failed to connect to database")
 	}
-	fmt.Println("Connected to the database")
+	log.Info("Successfully connected to database")
 
-	// AutoMigrate to ensure the users table exists with the correct schema
 	err = db.AutoMigrate(&User{})
 	if err != nil {
-		log.Fatalf("Could not migrate database: %v", err)
+		log.WithError(err).Fatal("Database migration failed")
 	}
+	log.Info("Database migration completed successfully")
 }
 
 // Create or Update User Handler
@@ -69,23 +125,78 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
-	case http.MethodPost:
-		createUser(w, r)
-	case http.MethodGet:
-		getAllUsers(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+    case http.MethodPost:
+        createUser(w, r)
+    case http.MethodGet:
+        getAllUsers(w, r)
+    default:
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+    }
 }
 
 // Create User
-func createUser(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+// func createUser(w http.ResponseWriter, r *http.Request) {
+// 	w.Header().Set("Content-Type", "application/json")
 
+// 	var user User
+// 	err := json.NewDecoder(r.Body).Decode(&user)
+// 	if err != nil {
+// 		// Ensure JSON error response
+// 		w.WriteHeader(http.StatusBadRequest)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: "Invalid request body",
+// 		})
+// 		return
+// 	}
+
+// 	// Validate input
+// 	if user.UserName == "" || user.UserEmail == "" {
+// 		w.WriteHeader(http.StatusBadRequest)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: "Name and email are required",
+// 		})
+// 		return
+// 	}
+
+// 	// Validate email
+// 	if !isValidEmail(user.UserEmail) {
+// 		http.Error(w, "Invalid email format", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	// Set timestamps
+// 	now := time.Now()
+// 	user.CreatedAt = now
+// 	user.UpdatedAt = now
+
+// 	// Create user in database
+// 	result := db.Create(&user)
+// 	if result.Error != nil {
+// 		w.WriteHeader(http.StatusInternalServerError)
+// 		json.NewEncoder(w).Encode(ResponseData{
+// 			Status:  "error",
+// 			Message: fmt.Sprintf("Could not create user: %v", result.Error),
+// 		})
+// 		return
+// 	}
+
+// 	// Respond with created user
+// 	w.WriteHeader(http.StatusCreated)
+// 	json.NewEncoder(w).Encode(ResponseData{
+// 		Status:  "success",
+// 		Message: "User created successfully",
+// 		Data:    user,
+// 	})
+// }
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+	logger := log.WithField("handler", "createUser")
+	
 	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
-		// Ensure JSON error response
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		logger.WithError(err).Error("Failed to decode request body")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ResponseData{
 			Status:  "error",
@@ -94,8 +205,8 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate input
 	if user.UserName == "" || user.UserEmail == "" {
+		logger.Warn("Missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ResponseData{
 			Status:  "error",
@@ -104,29 +215,28 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate email
 	if !isValidEmail(user.UserEmail) {
+		logger.WithField("email", user.UserEmail).Warn("Invalid email format")
 		http.Error(w, "Invalid email format", http.StatusBadRequest)
 		return
 	}
 
-	// Set timestamps
 	now := time.Now()
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
-	// Create user in database
 	result := db.Create(&user)
 	if result.Error != nil {
+		logger.WithError(result.Error).Error("Failed to create user in database")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ResponseData{
 			Status:  "error",
-			Message: fmt.Sprintf("Could not create user: %v", result.Error),
+			Message: "Could not create user",
 		})
 		return
 	}
 
-	// Respond with created user
+	logger.WithField("user_id", user.UserID).Info("User created successfully")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(ResponseData{
 		Status:  "success",
@@ -135,19 +245,133 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
 // Get All Users
 func getAllUsers(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Content-Type", "application/json")
 
-	var users []User
-	result := db.Find(&users)
-	if result.Error != nil {
-		http.Error(w, fmt.Sprintf("Could not retrieve users: %v", result.Error), http.StatusInternalServerError)
-		return
-	}
+    // Parse query parameters
+    filterField := r.URL.Query().Get("filter_field")
+    filterValue := r.URL.Query().Get("filter_value")
+    filterOperator := r.URL.Query().Get("filter_operator")
+    sortField := r.URL.Query().Get("sort_field")
+    sortDir := r.URL.Query().Get("sort_dir")
+    
+    // Parse pagination parameters
+    page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+    if page < 1 {
+        page = 1
+    }
+    itemsPerPage := 5 // Default items per page
 
-	json.NewEncoder(w).Encode(users)
+    // Build base query
+    query := db.Model(&User{})
+
+    // Apply filters if provided
+    if filterValue != "" {
+        query = applyFilter(query, filterField, filterValue, filterOperator)
+    }
+
+    // Get total count before pagination
+    var totalItems int64
+    query.Count(&totalItems)
+
+    // Apply sorting
+    query = applySorting(query, sortField, sortDir)
+
+    // Apply pagination
+    offset := (page - 1) * itemsPerPage
+    query = query.Offset(offset).Limit(itemsPerPage)
+
+    // Execute query
+    var users []User
+    result := query.Find(&users)
+    if result.Error != nil {
+        sendErrorResponse(w, "Could not retrieve users", http.StatusInternalServerError)
+        return
+    }
+
+    // Calculate total pages
+    totalPages := int(math.Ceil(float64(totalItems) / float64(itemsPerPage)))
+
+    // Send response
+    json.NewEncoder(w).Encode(PaginatedResponse{
+        Status:      "success",
+        Message:     "Users retrieved successfully",
+        Data:        users,
+        TotalItems:  totalItems,
+        TotalPages:  totalPages,
+        CurrentPage: page,
+    })
 }
+
+// Helper function to apply filters
+func applyFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
+    switch field {
+    case "name":
+        return applyStringFilter(query, "user_name", value, operator)
+    case "email":
+        return applyStringFilter(query, "user_email", value, operator)
+    case "date":
+        return applyDateFilter(query, "created_at", value, operator)
+    default:
+        return query
+    }
+}
+
+// Helper function for string filters
+func applyStringFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
+    switch operator {
+    case "contains":
+        return query.Where(field+" ILIKE ?", "%"+value+"%")
+    case "equals":
+        return query.Where(field+" = ?", value)
+    case "startsWith":
+        return query.Where(field+" ILIKE ?", value+"%")
+    case "endsWith":
+        return query.Where(field+" ILIKE ?", "%"+value)
+    default:
+        return query
+    }
+}
+
+// Helper function for sorting
+func applySorting(query *gorm.DB, field, direction string) *gorm.DB {
+    if field == "" {
+        return query.Order("user_id asc")
+    }
+    
+    if direction != "desc" {
+        direction = "asc"
+    }
+    
+    return query.Order(fmt.Sprintf("%s %s", field, direction))
+}
+
+// Helper function for error responses
+func sendErrorResponse(w http.ResponseWriter, message string, statusCode int) {
+    w.WriteHeader(statusCode)
+    json.NewEncoder(w).Encode(ResponseData{
+        Status:  "error",
+        Message: message,
+    })
+}
+
+
+// Helper function for date filters
+func applyDateFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
+    switch operator {
+    case "equals":
+        return query.Where(field+" BETWEEN ? AND ?", value, value+"T23:59:59Z")
+    case "before":
+        return query.Where(field+" < ?", value)
+    case "after":
+        return query.Where(field+" > ?", value)
+    default:
+        return query
+    }
+}
+
 
 // Delete User
 func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -250,31 +474,63 @@ func createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetUser retrieves a user by ID
 func getUserHandler(w http.ResponseWriter, r *http.Request) {
+	// Enable CORS
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-ijt, X-Requested-With, Authorization")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Extract ID from query
-	id := r.URL.Query().Get("id")
-	if id == "" {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
 		http.Error(w, "Missing 'id' parameter", http.StatusBadRequest)
 		return
 	}
 
+	// Convert string ID to uint
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		return
+	}
+
 	var user User
-	result := db.First(&user, id)
+	result := db.First(&user, uint(id))
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			http.Error(w, "User not found", http.StatusNotFound)
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(ResponseData{
+				Status:  "error",
+				Message: "User not found",
+			})
 		} else {
-			http.Error(w, fmt.Sprintf("Error retrieving user: %v", result.Error), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ResponseData{
+				Status:  "error",
+				Message: fmt.Sprintf("Error retrieving user: %v", result.Error),
+			})
 		}
 		return
 	}
 
+	// Return successful response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(ResponseData{
+		Status:  "success",
+		Message: "User retrieved successfully",
+		Data:    user,
+	})
 }
 
 // GetAllUsers retrieves all users from the database
@@ -375,39 +631,6 @@ func updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DeleteUser deletes a user by ID
-//func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
-//	if r.Method != http.MethodDelete {
-//		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-//		return
-//	}
-//
-//	// Extract ID from query
-//	id := r.URL.Query().Get("id")
-//	if id == "" {
-//		http.Error(w, "Missing 'id' parameter", http.StatusBadRequest)
-//		return
-//	}
-//
-//	// Delete user
-//	result := db.Delete(&User{}, id)
-//	if result.Error != nil {
-//		http.Error(w, fmt.Sprintf("Could not delete user: %v", result.Error), http.StatusInternalServerError)
-//		return
-//	}
-//
-//	// Check if any row was actually deleted
-//	if result.RowsAffected == 0 {
-//		http.Error(w, "No user found with the given ID", http.StatusNotFound)
-//		return
-//	}
-//
-//	w.Header().Set("Content-Type", "application/json")
-//	json.NewEncoder(w).Encode(map[string]string{
-//		"status":  "success",
-//		"message": "User deleted successfully",
-//	})
-//}
 
 // Helper function to validate email
 func isValidEmail(email string) bool {
@@ -425,125 +648,6 @@ func isValidEmail(email string) bool {
 		dotIndex < len(email)-1
 }
 
-//const maxRequestBodySize = 1 << 20 // 1MB limit
-//
-//// POST request handler
-//func postHandler(w http.ResponseWriter, r *http.Request) {
-//	// Allow only POST method
-//	if r.Method != http.MethodPost {
-//		w.WriteHeader(http.StatusMethodNotAllowed)
-//		response := ResponseData{"fail", "Only POST method is allowed"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Set response header
-//	w.Header().Set("Content-Type", "application/json")
-//
-//	// Limit request body size to prevent abuse
-//	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-//
-//	// Check if request body is empty
-//	if r.Body == http.NoBody {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "Request body cannot be empty"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Parse JSON body and detect unexpected fields
-//	var requestData map[string]interface{}
-//	decoder := json.NewDecoder(r.Body)
-//	decoder.DisallowUnknownFields() // Disallow extra/unknown fields
-//	err := decoder.Decode(&requestData)
-//	if err != nil {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "Invalid JSON or unexpected fields"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Check if "message" key exists
-//	message, ok := requestData["message"]
-//	if !ok {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "Message field is required"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Ensure "message" value is a string (empty string is allowed)
-//	messageStr, isString := message.(string)
-//	if !isString {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "Message field must be a string"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Print the valid message to server console
-//	fmt.Printf("Received message: %s\n", messageStr)
-//
-//	// Send success response
-//	response := ResponseData{"success", "Data successfully received"}
-//	json.NewEncoder(w).Encode(response)
-//}
-//
-//const maxQueryParamSize = 1024 // 1KB limit for query string size
-//
-//// GET request handler
-//func getHandler(w http.ResponseWriter, r *http.Request) {
-//	// Allow only GET method
-//	if r.Method != http.MethodGet {
-//		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-//		return
-//	}
-//
-//	// Set response header
-//	w.Header().Set("Content-Type", "application/json")
-//
-//	// Check query string size
-//	queryString := r.URL.RawQuery
-//	if len(queryString) > maxQueryParamSize {
-//		http.Error(w, "Query string size exceeds limit", http.StatusRequestEntityTooLarge)
-//		return
-//	}
-//
-//	// Parse and log query parameters
-//	queryParams := r.URL.Query()
-//	if len(queryParams) == 0 {
-//		fmt.Println("No query parameters provided")
-//	} else {
-//		fmt.Println("Query Parameters:", queryParams)
-//	}
-//
-//	// Validate "message" query parameter
-//	msg := queryParams.Get("message")
-//	if strings.TrimSpace(msg) == "" {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "Missing 'message' query parameter"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	// Check message length
-//	if len(msg) > 256 {
-//		w.WriteHeader(http.StatusBadRequest)
-//		response := ResponseData{"fail", "'message' parameter is too long"}
-//		json.NewEncoder(w).Encode(response)
-//		return
-//	}
-//
-//	fmt.Println("Query parameter 'message':", msg)
-//
-//	// Send success response
-//	response := ResponseData{"success", "GET request received"}
-//	err := json.NewEncoder(w).Encode(response)
-//	if err != nil {
-//		log.Println("Error encoding JSON response:", err)
-//		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-//	}
-//}
 
 const maxRequestBodySize = 1 << 20 // 1MB limit
 const maxQueryParamSize = 1024     // 1KB limit for query string size
@@ -706,10 +810,6 @@ func main() {
 	// Initialize the database
 	initDB()
 
-	// Serve static files
-	//fs := http.FileServer(http.Dir("./static"))
-	//http.Handle("/static/", http.StripPrefix("/static/", fs))
-
 	// Routes
 	http.HandleFunc("/post", postHandler)
 	http.HandleFunc("/get", getHandler)
@@ -719,20 +819,11 @@ func main() {
 	http.HandleFunc("/user/create", corsMiddleware(createUserHandler))
 	http.HandleFunc("/user/update", corsMiddleware(updateUserHandler))
 	http.HandleFunc("/user/delete", corsMiddleware(deleteUserHandler))
+	http.HandleFunc("/user/get", corsMiddleware(getUserHandler))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
-
-	//// User management routes
-	//http.HandleFunc("/users", userHandler)
-	//
-	//// CRUD Routes for User
-	//http.HandleFunc("/user/create", createUserHandler)
-	//http.HandleFunc("/user/get", getUserHandler)
-	//http.HandleFunc("/user/list", getAllUsersHandler)
-	//http.HandleFunc("/user/update", updateUserHandler)
-	//http.HandleFunc("/user/delete", deleteUserHandler)
 
 	// Start the server
 	fmt.Println("Server is running on port 8080...")
