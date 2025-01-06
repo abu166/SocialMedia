@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"context"
 	// "log"
 	"errors"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -891,20 +893,22 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+var limiter = rate.NewLimiter(1, 3) // 1 request per second, burst of 3 requests
+
 func main() {
 	// Initialize the database
 	initDB()
 
 	// Routes
-	http.HandleFunc("/post", postHandler)
-	http.HandleFunc("/get", getHandler)
+	http.HandleFunc("/post", rateLimitedHandler(postHandler))
+	http.HandleFunc("/get", rateLimitedHandler(getHandler))
 
-	// Wrap your handlers with the CORS middleware
-	http.HandleFunc("/users", corsMiddleware(userHandler))
-	http.HandleFunc("/user/create", corsMiddleware(createUserHandler))
-	http.HandleFunc("/user/update", corsMiddleware(updateUserHandler))
-	http.HandleFunc("/user/delete", corsMiddleware(deleteUserHandler))
-	http.HandleFunc("/user/get", corsMiddleware(getUserHandler))
+	// Wrap your handlers with both CORS middleware and rate limiting
+	http.HandleFunc("/users", rateLimitedHandler(corsMiddleware(userHandler)))
+	http.HandleFunc("/user/create", rateLimitedHandler(corsMiddleware(createUserHandler)))
+	http.HandleFunc("/user/update", rateLimitedHandler(corsMiddleware(updateUserHandler)))
+	http.HandleFunc("/user/delete", rateLimitedHandler(corsMiddleware(deleteUserHandler)))
+	http.HandleFunc("/user/get", rateLimitedHandler(corsMiddleware(getUserHandler)))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("./static"))
@@ -913,4 +917,18 @@ func main() {
 	// Start the server
 	fmt.Println("Server is running on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+
+// rateLimitedHandler wraps an HTTP handler with rate limiting
+func rateLimitedHandler(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Wait for the limiter to allow the request
+		if err := limiter.Wait(context.Background()); err != nil {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		// Call the original handler
+		h(w, r)
+	}
 }
