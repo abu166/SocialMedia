@@ -6,9 +6,21 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
+        }
+        .controls-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .search-section {
+            margin-bottom: 15px;
+        }
+        .sort-section {
+            margin-bottom: 15px;
         }
         table {
             width: 100%;
@@ -17,25 +29,142 @@
         }
         table, th, td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 12px;
         }
         th {
             background-color: #f2f2f2;
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
         }
-        input, button {
+        th:hover {
+            background-color: #e6e6e6;
+        }
+        th::after {
+            content: '↕';
+            position: absolute;
+            right: 5px;
+            opacity: 0.5;
+        }
+        th.asc::after {
+            content: '↑';
+            opacity: 1;
+        }
+        th.desc::after {
+            content: '↓';
+            opacity: 1;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        input, select, button {
             margin: 5px;
-            padding: 5px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            min-width: 100px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .pagination {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .pagination-info {
+            color: #666;
         }
         .edit-form {
             display: none;
             background-color: #f9f9f9;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+        .filter-section {
+            margin: 15px 0;
             padding: 10px;
-            margin-top: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .filter-input {
+            width: 200px;
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .filter-label {
+            min-width: 80px;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
 <h1>User Management System</h1>
+
+<div class="controls-section">
+    <!-- Filter Controls -->
+    <div class="filter-group">
+        <span class="filter-label">Filter by:</span>
+        <select id="filterField" class="filter-input">
+            <option value="name">Name</option>
+            <option value="email">Email</option>
+            <option value="date">Created Date</option>
+        </select>
+        <input type="text" id="filterValue" class="filter-input" placeholder="Enter filter value..." />
+        <select id="filterOperator" class="filter-input">
+            <option value="contains">Contains</option>
+            <option value="equals">Equals</option>
+            <option value="startsWith">Starts with</option>
+            <option value="endsWith">Ends with</option>
+        </select>
+        <button onclick="applyFilters()">Apply Filter</button>
+        <button onclick="resetFilters()">Reset</button>
+    </div>
+
+    <!-- Sort Controls -->
+    <div class="sort-section">
+        <label for="sortField">Sort by:</label>
+        <select id="sortField" onchange="applySort()">
+            <option value="user_id">ID</option>
+            <option value="user_name">Name</option>
+            <option value="user_email">Email</option>
+            <option value="created_at">Created Date</option>
+        </select>
+        <select id="sortDirection" onchange="applySort()">
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+        </select>
+    </div>
+</div>
 
 <h2>Add New User</h2>
 <input id="name" placeholder="Name" required />
@@ -43,94 +172,207 @@
 <button onclick="addUser()">Add User</button>
 
 <h2>Users List</h2>
+<!-- Users Table -->
 <table id="usersTable">
     <thead>
-    <tr>
-        <th>ID</th>
-        <th>Name</th>
-        <th>Email</th>
-        <th>Created At</th>
-        <th>Actions</th>
-    </tr>
+        <tr>
+            <th onclick="sortByColumn('user_id')">ID</th>
+            <th onclick="sortByColumn('user_name')">Name</th>
+            <th onclick="sortByColumn('user_email')">Email</th>
+            <th onclick="sortByColumn('created_at')">Created At</th>
+            <th>Actions</th>
+        </tr>
     </thead>
     <tbody id="usersTableBody">
-    <!-- Users will be dynamically added here -->
+        <!-- Users will be dynamically added here -->
     </tbody>
 </table>
 
+<!-- Pagination Controls -->
+<div class="pagination">
+    <div class="pagination-info">
+        Showing <span id="startRange">0</span>-<span id="endRange">0</span> of <span id="totalItems">0</span> items
+    </div>
+    <div>
+        <button id="prevPage" onclick="previousPage()" disabled>Previous</button>
+        <span id="currentPage">1</span> of <span id="totalPages">1</span>
+        <button id="nextPage" onclick="nextPage()" disabled>Next</button>
+    </div>
+</div>
+
+<!-- Edit Form -->
 <div id="editForm" class="edit-form">
     <h3>Edit User</h3>
-    <input id="editUserId" type="hidden" />
-    <input id="editName" placeholder="New Name" />
-    <input id="editEmail" placeholder="New Email" />
+    <input type="hidden" id="editUserId" />
+    <input type="text" id="editName" placeholder="Name" />
+    <input type="email" id="editEmail" placeholder="Email" />
     <button onclick="updateUser()">Save Changes</button>
     <button onclick="cancelEdit()">Cancel</button>
 </div>
 
 <script>
-    // Function to fetch and display users
+    // Global variables
+    let allUsers = [];
+    let filteredUsers = [];
+    let currentPage = 1;
+    const itemsPerPage = 5;
+    let currentSort = { field: 'user_id', direction: 'asc' };
+
+    // Initialize the page
+    document.addEventListener('DOMContentLoaded', async () => {
+        await fetchUsers();
+        applyFiltersAndSort();
+    });
+
+    // Update the fetchUsers function to handle pagination response
+    // Update fetchUsers function
     async function fetchUsers() {
         try {
-            const response = await fetch('http://localhost:8080/users', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
+            const filterField = document.getElementById('filterField').value;
+            const filterValue = document.getElementById('filterValue').value;
+            const filterOperator = document.getElementById('filterOperator').value;
+            const sortField = document.getElementById('sortField').value;
+            const sortDir = document.getElementById('sortDirection').value;
+            
+            const queryParams = new URLSearchParams({
+                filter_field: filterField,
+                filter_value: filterValue,
+                filter_operator: filterOperator,
+                sort_field: sortField,
+                sort_dir: sortDir,
+                page: currentPage,
+                items_per_page: itemsPerPage
             });
-
-            // Check if the response is OK (status in the range 200-299)
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const response = await fetch(`http://localhost:8080/users?${queryParams}`);
+            if (!response.ok) throw new Error('Failed to fetch users');
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                filteredUsers = result.data;
+                updateTable();
+                updatePagination(
+                    (currentPage - 1) * itemsPerPage,
+                    (currentPage - 1) * itemsPerPage + result.data.length,
+                    result.total_items,
+                    result.total_pages
+                );
+            } else {
+                throw new Error(result.message || 'Failed to fetch users');
             }
-
-            const users = await response.json();
-
-            const tableBody = document.getElementById('usersTableBody');
-            tableBody.innerHTML = ''; // Clear existing rows
-
-            // Safely handle empty users array
-            if (!users || users.length === 0) {
-                const noUsersRow = `
-                <tr>
-                    <td colspan="5" class="text-center">No users found</td>
-                </tr>
-            `;
-                tableBody.innerHTML = noUsersRow;
-                return;
-            }
-
-            // Escape HTML to prevent XSS
-            users.forEach(user => {
-                const safeUserName = escapeHTML(user.user_name);
-                const safeUserEmail = escapeHTML(user.user_email);
-
-                const row = `
-                <tr>
-                    <td>${user.user_id || 'N/A'}</td>
-                    <td>${safeUserName}</td>
-                    <td>${safeUserEmail}</td>
-                    <td>${user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</td>
-                    <td>
-                        <button onclick="prepareEdit(${user.user_id}, '${safeUserName}', '${safeUserEmail}')">Edit</button>
-                        <button onclick="deleteUser(${user.user_id})">Delete</button>
-                    </td>
-                </tr>
-            `;
-                tableBody.innerHTML += row;
-            });
         } catch (error) {
-            console.error('Error fetching users:', error);
+            console.error('Error:', error);
+            document.getElementById('usersTableBody').innerHTML = 
+                `<tr><td colspan="5" class="loading">Error loading users: ${error.message}</td></tr>`;
+        }
+    }
 
-            const tableBody = document.getElementById('usersTableBody');
-            const errorRow = `
+    // Update the applyFiltersAndSort function
+    function applyFiltersAndSort() {
+        currentPage = 1; // Reset to first page when applying new filters
+        fetchUsers();
+    }
+
+    // Update filter functions
+    function applyFilters() {
+        currentPage = 1; // Reset to first page
+        fetchUsers();
+    }
+
+
+    // Sort users
+    function sortUsers(field, direction) {
+        filteredUsers.sort((a, b) => {
+            let comparison = 0;
+            if (a[field] > b[field]) comparison = 1;
+            if (a[field] < b[field]) comparison = -1;
+            return direction === 'asc' ? comparison : -comparison;
+        });
+    }
+
+    // Simplify updateTable since we're now getting paginated data from the server
+    function updateTable() {
+        const tableBody = document.getElementById('usersTableBody');
+        tableBody.innerHTML = filteredUsers.map(user => `
             <tr>
-                <td colspan="5" class="text-center" style="color: red;">
-                    Failed to fetch users. ${error.message}
+                <td>${user.user_id}</td>
+                <td>${escapeHtml(user.user_name)}</td>
+                <td>${escapeHtml(user.user_email)}</td>
+                <td>${new Date(user.created_at).toLocaleString()}</td>
+                <td>
+                    <button onclick="prepareEdit(${user.user_id}, '${escapeHtml(user.user_name)}', '${escapeHtml(user.user_email)}')">Edit</button>
+                    <button onclick="deleteUser(${user.user_id})">Delete</button>
                 </td>
             </tr>
-        `;
-            tableBody.innerHTML = errorRow;
+        `).join('');
+    }
+
+    // Update pagination controls
+    function updatePagination(startIndex, endIndex, totalItems, totalPages) {
+        document.getElementById('startRange').textContent = startIndex + 1;
+        document.getElementById('endRange').textContent = endIndex;
+        document.getElementById('totalItems').textContent = totalItems;
+        document.getElementById('currentPage').textContent = currentPage;
+        document.getElementById('totalPages').textContent = totalPages;
+        
+        document.getElementById('prevPage').disabled = currentPage === 1;
+        document.getElementById('nextPage').disabled = currentPage >= totalPages;
+    }
+
+
+    // Navigation functions
+    function previousPage() {
+            if (currentPage > 1) {
+            currentPage--;
+            fetchUsers();
         }
+    }
+
+    function nextPage() {
+        const totalPages = parseInt(document.getElementById('totalPages').textContent);
+        if (currentPage < totalPages) {
+            currentPage++;
+            fetchUsers();
+        }
+    }
+
+    // Sort by column header click
+    function sortByColumn(field) {
+        const headers = document.querySelectorAll('th');
+        headers.forEach(header => header.classList.remove('asc', 'desc'));
+        
+        const header = document.querySelector(`th[onclick="sortByColumn('${field}')"]`);
+        if (currentSort.field === field) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.field = field;
+            currentSort.direction = 'asc';
+        }
+        
+        header.classList.add(currentSort.direction);
+        
+        document.getElementById('sortField').value = field;
+        document.getElementById('sortDirection').value = currentSort.direction;
+        
+        applyFiltersAndSort();
+    }
+
+    // Helper function to escape HTML
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function resetFilters() {
+        document.getElementById('filterField').value = 'name';
+        document.getElementById('filterValue').value = '';
+        document.getElementById('filterOperator').value = 'contains';
+        document.getElementById('sortField').value = 'user_id';
+        document.getElementById('sortDirection').value = 'asc';
+        currentPage = 1;
+        fetchUsers();
     }
 
     // Helper function to escape HTML to prevent XSS
@@ -146,11 +388,23 @@
             }[tag] || tag));
     }
 
-    // Modify existing fetch call to handle CORS and add error handling
-    document.addEventListener('DOMContentLoaded', () => {
-        fetchUsers().catch(error => {
-            console.error('Initialization error:', error);
-            alert('Failed to load users. Please check your server connection.');
+    // // Modify existing fetch call to handle CORS and add error handling
+    // document.addEventListener('DOMContentLoaded', () => {
+    //     fetchUsers().catch(error => {
+    //         console.error('Initialization error:', error);
+    //         alert('Failed to load users. Please check your server connection.');
+    //     });
+    // });
+
+     // Initialize the page with event listeners
+     document.addEventListener('DOMContentLoaded', () => {
+        fetchUsers();
+        
+        // Add event listener for Enter key in filter input
+        document.getElementById('filterValue').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                applyFilters();
+            }
         });
     });
 
@@ -315,6 +569,117 @@
             alert('Failed to delete user');
         }
     }
+
+    async function searchById() {
+        const searchId = document.getElementById('searchId').value;
+        const tableBody = document.getElementById('usersTableBody');
+
+        if (!searchId) {
+            alert('Please enter a user ID');
+            return;
+        }
+
+        try {
+            const response = await fetch(`http://localhost:8080/user/get?id=${searchId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                // Add CORS mode explicitly
+                mode: 'cors',
+                credentials: 'same-origin'
+            });
+
+            // Clear existing rows
+            tableBody.innerHTML = '';
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center">No user found with ID: ${searchId}</td>
+                    </tr>
+                `;
+                    return;
+                }
+                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
+            if (result.status === 'success' && result.data) {
+                const user = result.data;
+                const safeUserName = escapeHTML(user.user_name);
+                const safeUserEmail = escapeHTML(user.user_email);
+
+                const row = `
+                <tr>
+                    <td>${user.user_id || 'N/A'}</td>
+                    <td>${safeUserName}</td>
+                    <td>${safeUserEmail}</td>
+                    <td>${user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</td>
+                    <td>
+                        <button onclick="prepareEdit(${user.user_id}, '${safeUserName}', '${safeUserEmail}')">Edit</button>
+                        <button onclick="deleteUser(${user.user_id})">Delete</button>
+                    </td>
+                </tr>
+            `;
+                tableBody.innerHTML = row;
+            } else {
+                tableBody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center">No user found with ID: ${searchId}</td>
+                </tr>
+            `;
+            }
+        } catch (error) {
+            console.error('Error searching for user:', error);
+            tableBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center" style="color: red;">
+                    Error searching for user: ${error.message}
+                </td>
+            </tr>
+        `;
+        }
+    }
+
+    // Function to show all users (existing fetchUsers function)
+    function showAllUsers() {
+        document.getElementById('searchId').value = ''; // Clear search input
+        fetchUsers(); // Use existing fetchUsers function
+    }
+
+    // Add event listener for Enter key
+    document.getElementById('filterValue').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            applyFilters();
+        }
+    });
+
+    // Update field options based on filter type
+    document.getElementById('filterField').addEventListener('change', (e) => {
+        const operatorSelect = document.getElementById('filterOperator');
+        const filterValue = document.getElementById('filterValue');
+        
+        if (e.target.value === 'date') {
+            filterValue.type = 'date';
+            operatorSelect.innerHTML = `
+                <option value="equals">Equals</option>
+                <option value="before">Before</option>
+                <option value="after">After</option>
+            `;
+        } else {
+            filterValue.type = 'text';
+            operatorSelect.innerHTML = `
+                <option value="contains">Contains</option>
+                <option value="equals">Equals</option>
+                <option value="startsWith">Starts with</option>
+                <option value="endsWith">Ends with</option>
+            `;
+        }
+    });
 
     // Fetch users when page loads
     document.addEventListener('DOMContentLoaded', fetchUsers);
