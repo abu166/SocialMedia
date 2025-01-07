@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"context"
+	"github.com/jordan-wright/email"
+	"io"
+	"net/smtp"
+	"os"
+
 	// "log"
 	"errors"
 	"math"
@@ -12,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/time/rate"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -44,36 +49,36 @@ type ResponseData struct {
 
 // QueryParams struct to handle filtering, sorting, and pagination parameters
 type QueryParams struct {
-    SearchTerm   string `json:"search_term"`
-    SortField    string `json:"sort_field"`
-    SortDir      string `json:"sort_dir"`
-    Page         int    `json:"page"`
-    ItemsPerPage int    `json:"items_per_page"`
+	SearchTerm   string `json:"search_term"`
+	SortField    string `json:"sort_field"`
+	SortDir      string `json:"sort_dir"`
+	Page         int    `json:"page"`
+	ItemsPerPage int    `json:"items_per_page"`
 }
 
 // PaginatedResponse struct to return paginated data
 type PaginatedResponse struct {
-    Status     string      `json:"status"`
-    Message    string      `json:"message"`
-    Data       interface{} `json:"data"`
-    TotalItems int64      `json:"total_items"`
-    TotalPages int        `json:"total_pages"`
-    CurrentPage int       `json:"current_page"`
+	Status      string      `json:"status"`
+	Message     string      `json:"message"`
+	Data        interface{} `json:"data"`
+	TotalItems  int64       `json:"total_items"`
+	TotalPages  int         `json:"total_pages"`
+	CurrentPage int         `json:"current_page"`
 }
 
 // Add new types for filter handling
 type FilterParams struct {
-    Field    string `json:"field"`
-    Value    string `json:"value"`
-    Operator string `json:"operator"`
+	Field    string `json:"field"`
+	Value    string `json:"value"`
+	Operator string `json:"operator"`
 }
 
 // Custom error types
 var (
-    ErrUserNotFound = errors.New("user not found")
-    ErrInvalidInput = errors.New("invalid input")
-    ErrDuplicateEmail = errors.New("email already exists")
-    ErrDatabaseOperation = errors.New("database operation failed")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrInvalidInput      = errors.New("invalid input")
+	ErrDuplicateEmail    = errors.New("email already exists")
+	ErrDatabaseOperation = errors.New("database operation failed")
 )
 
 // Initialize database connection
@@ -103,11 +108,11 @@ var (
 func initDB() {
 	var err error
 	dsn := "host=localhost user=abukhassymkhydyrbayev password=admin dbname=social_pub port=5432 sslmode=disable"
-	
+
 	log = logrus.New()
 	log.SetFormatter(&logrus.JSONFormatter{})
 	log.SetLevel(logrus.InfoLevel)
-	
+
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.WithError(err).Fatal("Failed to connect to database")
@@ -136,13 +141,13 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
-    case http.MethodPost:
-        createUser(w, r)
-    case http.MethodGet:
-        getAllUsers(w, r)
-    default:
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-    }
+	case http.MethodPost:
+		createUser(w, r)
+	case http.MethodGet:
+		getAllUsers(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // Create User
@@ -204,7 +209,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 // func createUser(w http.ResponseWriter, r *http.Request) {
 // 	logger := log.WithField("handler", "createUser")
-	
+
 // 	var user User
 // 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 // 		logger.WithError(err).Error("Failed to decode request body")
@@ -257,208 +262,206 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 // }
 
 func createUser(w http.ResponseWriter, r *http.Request) {
-    logger := log.WithField("handler", "createUser")
-    
-    var user User
-    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-        handleError(w, fmt.Errorf("%w: %v", ErrInvalidInput, err), http.StatusBadRequest, logger)
-        return
-    }
+	logger := log.WithField("handler", "createUser")
 
-    if err := validateUser(user); err != nil {
-        handleError(w, err, http.StatusBadRequest, logger)
-        return
-    }
+	var user User
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		handleError(w, fmt.Errorf("%w: %v", ErrInvalidInput, err), http.StatusBadRequest, logger)
+		return
+	}
 
-    if err := db.Create(&user).Error; err != nil {
-        if isDuplicateEmailError(err) {
-            handleError(w, ErrDuplicateEmail, http.StatusConflict, logger)
-            return
-        }
-        handleError(w, fmt.Errorf("%w: %v", ErrDatabaseOperation, err), http.StatusInternalServerError, logger)
-        return
-    }
+	if err := validateUser(user); err != nil {
+		handleError(w, err, http.StatusBadRequest, logger)
+		return
+	}
 
-    sendJSONResponse(w, http.StatusCreated, ResponseData{
-        Status: "success",
-        Message: "User created successfully",
-        Data: user,
-    })
+	if err := db.Create(&user).Error; err != nil {
+		if isDuplicateEmailError(err) {
+			handleError(w, ErrDuplicateEmail, http.StatusConflict, logger)
+			return
+		}
+		handleError(w, fmt.Errorf("%w: %v", ErrDatabaseOperation, err), http.StatusInternalServerError, logger)
+		return
+	}
+
+	sendJSONResponse(w, http.StatusCreated, ResponseData{
+		Status:  "success",
+		Message: "User created successfully",
+		Data:    user,
+	})
 }
 
 // Get All Users
 func getAllUsers(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-    // Parse query parameters
-    filterField := r.URL.Query().Get("filter_field")
-    filterValue := r.URL.Query().Get("filter_value")
-    filterOperator := r.URL.Query().Get("filter_operator")
-    sortField := r.URL.Query().Get("sort_field")
-    sortDir := r.URL.Query().Get("sort_dir")
-    
-    // Parse pagination parameters
-    page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-    if page < 1 {
-        page = 1
-    }
-    itemsPerPage := 5 // Default items per page
+	// Parse query parameters
+	filterField := r.URL.Query().Get("filter_field")
+	filterValue := r.URL.Query().Get("filter_value")
+	filterOperator := r.URL.Query().Get("filter_operator")
+	sortField := r.URL.Query().Get("sort_field")
+	sortDir := r.URL.Query().Get("sort_dir")
 
-    // Build base query
-    query := db.Model(&User{})
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	itemsPerPage := 5 // Default items per page
 
-    // Apply filters if provided
-    if filterValue != "" {
-        query = applyFilter(query, filterField, filterValue, filterOperator)
-    }
+	// Build base query
+	query := db.Model(&User{})
 
-    // Get total count before pagination
-    var totalItems int64
-    query.Count(&totalItems)
+	// Apply filters if provided
+	if filterValue != "" {
+		query = applyFilter(query, filterField, filterValue, filterOperator)
+	}
 
-    // Apply sorting
-    query = applySorting(query, sortField, sortDir)
+	// Get total count before pagination
+	var totalItems int64
+	query.Count(&totalItems)
 
-    // Apply pagination
-    offset := (page - 1) * itemsPerPage
-    query = query.Offset(offset).Limit(itemsPerPage)
+	// Apply sorting
+	query = applySorting(query, sortField, sortDir)
 
-    // Execute query
-    var users []User
-    result := query.Find(&users)
-    if result.Error != nil {
-        sendErrorResponse(w, "Could not retrieve users", http.StatusInternalServerError)
-        return
-    }
+	// Apply pagination
+	offset := (page - 1) * itemsPerPage
+	query = query.Offset(offset).Limit(itemsPerPage)
 
-    // Calculate total pages
-    totalPages := int(math.Ceil(float64(totalItems) / float64(itemsPerPage)))
+	// Execute query
+	var users []User
+	result := query.Find(&users)
+	if result.Error != nil {
+		sendErrorResponse(w, "Could not retrieve users", http.StatusInternalServerError)
+		return
+	}
 
-    // Send response
-    json.NewEncoder(w).Encode(PaginatedResponse{
-        Status:      "success",
-        Message:     "Users retrieved successfully",
-        Data:        users,
-        TotalItems:  totalItems,
-        TotalPages:  totalPages,
-        CurrentPage: page,
-    })
+	// Calculate total pages
+	totalPages := int(math.Ceil(float64(totalItems) / float64(itemsPerPage)))
+
+	// Send response
+	json.NewEncoder(w).Encode(PaginatedResponse{
+		Status:      "success",
+		Message:     "Users retrieved successfully",
+		Data:        users,
+		TotalItems:  totalItems,
+		TotalPages:  totalPages,
+		CurrentPage: page,
+	})
 }
 
 // Helper function to apply filters
 func applyFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
-    switch field {
-    case "name":
-        return applyStringFilter(query, "user_name", value, operator)
-    case "email":
-        return applyStringFilter(query, "user_email", value, operator)
-    case "date":
-        return applyDateFilter(query, "created_at", value, operator)
-    default:
-        return query
-    }
+	switch field {
+	case "name":
+		return applyStringFilter(query, "user_name", value, operator)
+	case "email":
+		return applyStringFilter(query, "user_email", value, operator)
+	case "date":
+		return applyDateFilter(query, "created_at", value, operator)
+	default:
+		return query
+	}
 }
 
 // Helper function for string filters
 func applyStringFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
-    switch operator {
-    case "contains":
-        return query.Where(field+" ILIKE ?", "%"+value+"%")
-    case "equals":
-        return query.Where(field+" = ?", value)
-    case "startsWith":
-        return query.Where(field+" ILIKE ?", value+"%")
-    case "endsWith":
-        return query.Where(field+" ILIKE ?", "%"+value)
-    default:
-        return query
-    }
+	switch operator {
+	case "contains":
+		return query.Where(field+" ILIKE ?", "%"+value+"%")
+	case "equals":
+		return query.Where(field+" = ?", value)
+	case "startsWith":
+		return query.Where(field+" ILIKE ?", value+"%")
+	case "endsWith":
+		return query.Where(field+" ILIKE ?", "%"+value)
+	default:
+		return query
+	}
 }
 
 // Helper function for sorting
 func applySorting(query *gorm.DB, field, direction string) *gorm.DB {
-    if field == "" {
-        return query.Order("user_id asc")
-    }
-    
-    if direction != "desc" {
-        direction = "asc"
-    }
-    
-    return query.Order(fmt.Sprintf("%s %s", field, direction))
+	if field == "" {
+		return query.Order("user_id asc")
+	}
+
+	if direction != "desc" {
+		direction = "asc"
+	}
+
+	return query.Order(fmt.Sprintf("%s %s", field, direction))
 }
 
 // Helper function for error responses
 func sendErrorResponse(w http.ResponseWriter, message string, statusCode int) {
-    w.WriteHeader(statusCode)
-    json.NewEncoder(w).Encode(ResponseData{
-        Status:  "error",
-        Message: message,
-    })
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(ResponseData{
+		Status:  "error",
+		Message: message,
+	})
 }
 
 // Centralized error handler
 func handleError(w http.ResponseWriter, err error, statusCode int, logger *logrus.Entry) {
-    logger.WithError(err).Error("Operation failed")
-    
-    var response ResponseData
-    switch {
-    case errors.Is(err, ErrUserNotFound):
-        response = ResponseData{Status: "error", Message: "User not found"}
-    case errors.Is(err, ErrInvalidInput):
-        response = ResponseData{Status: "error", Message: "Invalid input provided"}
-    case errors.Is(err, ErrDuplicateEmail):
-        response = ResponseData{Status: "error", Message: "Email already exists"}
-    default:
-        response = ResponseData{Status: "error", Message: "Internal server error"}
-    }
+	logger.WithError(err).Error("Operation failed")
 
-    sendJSONResponse(w, statusCode, response)
+	var response ResponseData
+	switch {
+	case errors.Is(err, ErrUserNotFound):
+		response = ResponseData{Status: "error", Message: "User not found"}
+	case errors.Is(err, ErrInvalidInput):
+		response = ResponseData{Status: "error", Message: "Invalid input provided"}
+	case errors.Is(err, ErrDuplicateEmail):
+		response = ResponseData{Status: "error", Message: "Email already exists"}
+	default:
+		response = ResponseData{Status: "error", Message: "Internal server error"}
+	}
+
+	sendJSONResponse(w, statusCode, response)
 }
 
 // Helper function for JSON responses
 func sendJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(statusCode)
-    if err := json.NewEncoder(w).Encode(data); err != nil {
-        log.WithError(err).Error("Failed to encode JSON response")
-    }
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.WithError(err).Error("Failed to encode JSON response")
+	}
 }
 
 // User validation
 func validateUser(user User) error {
-    if user.UserName == "" {
-        return fmt.Errorf("%w: username is required", ErrInvalidInput)
-    }
-    if user.UserEmail == "" {
-        return fmt.Errorf("%w: email is required", ErrInvalidInput)
-    }
-    if !isValidEmail(user.UserEmail) {
-        return fmt.Errorf("%w: invalid email format", ErrInvalidInput)
-    }
-    return nil
+	if user.UserName == "" {
+		return fmt.Errorf("%w: username is required", ErrInvalidInput)
+	}
+	if user.UserEmail == "" {
+		return fmt.Errorf("%w: email is required", ErrInvalidInput)
+	}
+	if !isValidEmail(user.UserEmail) {
+		return fmt.Errorf("%w: invalid email format", ErrInvalidInput)
+	}
+	return nil
 }
 
 // Helper to check for duplicate email errors
 func isDuplicateEmailError(err error) bool {
-    return strings.Contains(err.Error(), "duplicate key value violates unique constraint")
+	return strings.Contains(err.Error(), "duplicate key value violates unique constraint")
 }
-
 
 // Helper function for date filters
 func applyDateFilter(query *gorm.DB, field, value, operator string) *gorm.DB {
-    switch operator {
-    case "equals":
-        return query.Where(field+" BETWEEN ? AND ?", value, value+"T23:59:59Z")
-    case "before":
-        return query.Where(field+" < ?", value)
-    case "after":
-        return query.Where(field+" > ?", value)
-    default:
-        return query
-    }
+	switch operator {
+	case "equals":
+		return query.Where(field+" BETWEEN ? AND ?", value, value+"T23:59:59Z")
+	case "before":
+		return query.Where(field+" < ?", value)
+	case "after":
+		return query.Where(field+" > ?", value)
+	default:
+		return query
+	}
 }
-
 
 // Delete User
 func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -718,7 +721,6 @@ func updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 // Helper function to validate email
 func isValidEmail(email string) bool {
 	// Basic email validation
@@ -734,7 +736,6 @@ func isValidEmail(email string) bool {
 		dotIndex > atIndex &&
 		dotIndex < len(email)-1
 }
-
 
 const maxRequestBodySize = 1 << 20 // 1MB limit
 const maxQueryParamSize = 1024     // 1KB limit for query string size
@@ -893,6 +894,61 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func sendEmail(w http.ResponseWriter, r *http.Request) {
+	// Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Unable to process form", http.StatusBadRequest)
+		return
+	}
+
+	// Extract form fields
+	from := r.FormValue("email")
+	message := r.FormValue("message")
+
+	// Create a new email
+	e := email.NewEmail()
+	e.From = from
+	e.To = []string{"kh.abukhassym@gmail.com"}
+	e.Subject = "Support Request"
+	e.Text = []byte(message)
+
+	// Handle attachment
+	file, header, err := r.FormFile("attachment")
+	if err == nil {
+		defer file.Close()
+		attachmentPath := "./" + header.Filename
+		out, err := os.Create(attachmentPath)
+		if err != nil {
+			log.Println("Error saving attachment:", err)
+			http.Error(w, "Error saving attachment", http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+
+		// Write file content
+		if _, err = io.Copy(out, file); err != nil {
+			log.Println("Error copying file:", err)
+			http.Error(w, "Error processing file", http.StatusInternalServerError)
+			return
+		}
+
+		// Attach file to email
+		e.AttachFile(attachmentPath)
+		defer os.Remove(attachmentPath)
+	}
+
+	// Send email via SMTP
+	auth := smtp.PlainAuth("", "kh.abukhassym@gmail.com", "bsml lwzy akas ezfm", "smtp.gmail.com")
+	if err := e.Send("smtp.gmail.com:587", auth); err != nil {
+		log.Println("Error sending email:", err)
+		http.Error(w, "Error sending email", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
 var limiter = rate.NewLimiter(1, 3) // 1 request per second, burst of 3 requests
 
 func main() {
@@ -910,6 +966,9 @@ func main() {
 	http.HandleFunc("/user/delete", rateLimitedHandler(corsMiddleware(deleteUserHandler)))
 	http.HandleFunc("/user/get", rateLimitedHandler(corsMiddleware(getUserHandler)))
 
+	// Send Email
+	http.HandleFunc("/send-email", corsMiddleware(sendEmail))
+
 	// Serve static files
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
@@ -918,7 +977,6 @@ func main() {
 	fmt.Println("Server is running on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
-
 
 // rateLimitedHandler wraps an HTTP handler with rate limiting
 func rateLimitedHandler(h http.HandlerFunc) http.HandlerFunc {
