@@ -1,0 +1,5 @@
+{"action":"connect","level":"info","message":"Attempting to connect to database","service":"database","timestamp":"2025-01-14T10:11:31+05:00"}
+{"level":"info","message":"Successfully connected to database","status":"success","timestamp":"2025-01-14T10:11:31+05:00"}
+{"level":"info","message":"Database migration completed successfully","timestamp":"2025-01-14T10:11:31+05:00"}
+{"level":"info","message":"Server starting up","port":8080,"service":"web-server","timestamp":"2025-01-14T10:11:31+05:00"}
+{"level":"info","message":"Server is running on port 8080...","timestamp":"2025-01-14T10:11:31+05:00"}

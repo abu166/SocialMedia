@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"github.com/jordan-wright/email"
 	"io"
 	"net/smtp"
@@ -105,24 +106,90 @@ var (
 // 	log.Info("Logger initialized")
 // }
 
+// CustomFormatter extends JSONFormatter to ensure consistent formatting
+type CustomFormatter struct {
+	logrus.JSONFormatter
+}
+
+func initLogger() (*logrus.Logger, error) {
+	logger := logrus.New()
+
+	// Create logs directory if it doesn't exist
+	logDir := "./logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %v", err)
+	}
+
+	// Create log file with current date
+	currentTime := time.Now().Format("2006-01-02")
+	logFileName := fmt.Sprintf("app-%s.log", currentTime)
+	logFilePath := filepath.Join(logDir, logFileName)
+
+	// Open log file with append mode
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %v", err)
+	}
+
+	// Set up multi-writer to write to both file and stdout
+	mw := io.MultiWriter(os.Stdout, logFile)
+	logger.SetOutput(mw)
+
+	// Configure JSON formatter
+	logger.SetFormatter(&logrus.JSONFormatter{
+		TimestampFormat:   time.RFC3339,
+		DisableTimestamp: false,
+		DisableHTMLEscape: true,
+		PrettyPrint:      false,
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime:  "timestamp",
+			logrus.FieldKeyLevel: "level",
+			logrus.FieldKeyMsg:   "message",
+		},
+	})
+
+	// Set log level
+	logger.SetLevel(logrus.InfoLevel)
+
+	return logger, nil
+}
+
 func initDB() {
 	var err error
 	dsn := "host=localhost user=abukhassymkhydyrbayev password=admin dbname=social_pub port=5432 sslmode=disable"
 
-	log = logrus.New()
-	log.SetFormatter(&logrus.JSONFormatter{})
-	log.SetLevel(logrus.InfoLevel)
+	// Initialize logger
+	log, err = initLogger()
+	if err != nil {
+		fmt.Printf("Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Test logging
+	log.WithFields(logrus.Fields{
+		"service": "database",
+		"action":  "connect",
+	}).Info("Attempting to connect to database")
 
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.WithError(err).Fatal("Failed to connect to database")
+		log.WithFields(logrus.Fields{
+			"error": err,
+			"dsn":   dsn,
+		}).Fatal("Failed to connect to database")
 	}
-	log.Info("Successfully connected to database")
+
+	log.WithFields(logrus.Fields{
+		"status": "success",
+	}).Info("Successfully connected to database")
 
 	err = db.AutoMigrate(&User{})
 	if err != nil {
-		log.WithError(err).Fatal("Database migration failed")
+		log.WithFields(logrus.Fields{
+			"error": err,
+		}).Fatal("Database migration failed")
 	}
+
 	log.Info("Database migration completed successfully")
 }
 
@@ -952,8 +1019,14 @@ func sendEmail(w http.ResponseWriter, r *http.Request) {
 var limiter = rate.NewLimiter(1, 3) // 1 request per second, burst of 3 requests
 
 func main() {
+
 	// Initialize the database
 	initDB()
+
+	log.WithFields(logrus.Fields{
+		"port":    8080,
+		"service": "web-server",
+	}).Info("Server starting up")
 
 	// Routes
 	http.HandleFunc("/post", rateLimitedHandler(postHandler))
@@ -973,9 +1046,13 @@ func main() {
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
-	// Start the server
-	fmt.Println("Server is running on port 8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Log the actual server start
+	log.Info("Server is running on port 8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.WithFields(logrus.Fields{
+			"error": err,
+		}).Fatal("Server failed to start")
+	}
 }
 
 // rateLimitedHandler wraps an HTTP handler with rate limiting
